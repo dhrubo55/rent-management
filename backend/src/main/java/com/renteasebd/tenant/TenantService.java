@@ -245,6 +245,7 @@ public class TenantService {
 
     @Transactional(readOnly = true)
     public List<TenantHistoryResponse> history(Long tenantId, Long actorUserId, UserRole role) {
+        requireOwnerForHistoricalAggregate(role);
         getTenant(tenantId, actorUserId, role);
         return historyRepository.findByTenantIdOrderByStartDateDesc(tenantId).stream()
             .map(h -> new TenantHistoryResponse(h.getId(), h.getTenantId(), h.getPropertyUnitId(), h.getStartDate(), h.getEndDate()))
@@ -253,6 +254,7 @@ public class TenantService {
 
     @Transactional(readOnly = true)
     public List<AuditTimelineItemResponse> activity(Long tenantId, Long actorUserId, UserRole role) {
+        requireOwnerForHistoricalAggregate(role);
         getTenant(tenantId, actorUserId, role);
         return auditLogRepository.findTop100ByEntityTypeAndEntityIdOrderByCreatedAtDesc("TENANT", String.valueOf(tenantId)).stream()
             .map(this::toTimelineResponse)
@@ -261,6 +263,7 @@ public class TenantService {
 
     @Transactional(readOnly = true)
     public TenantLedgerResponse ledger(Long tenantId, Long actorUserId, UserRole role) {
+        requireOwnerForHistoricalAggregate(role);
         getTenant(tenantId, actorUserId, role);
 
         List<Invoice> invoices = invoiceRepository.findByTenantIdOrderByBillingPeriodStartDescIdDesc(tenantId);
@@ -360,6 +363,12 @@ public class TenantService {
             .orElseThrow(() -> new AppException("TENANT_NOT_FOUND", "Tenant not found", "tenantId"));
         access.requireTenant(tenant, actorUserId, role);
         return tenant;
+    }
+
+    private void requireOwnerForHistoricalAggregate(UserRole role) {
+        if (role != UserRole.OWNER) {
+            throw new AppException("FORBIDDEN", "Historical tenant records require owner access", "tenantId");
+        }
     }
 
     private PropertyUnit getUnit(Long unitId) {

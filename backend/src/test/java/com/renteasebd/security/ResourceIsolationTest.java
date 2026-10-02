@@ -105,6 +105,9 @@ class ResourceIsolationTest {
         mvc.perform(get("/api/v1/tenants/{id}/nid-image", tenant.getId())
                 .header("Authorization", "Bearer " + token))
             .andExpect(status().is4xxClientError());
+        mvc.perform(get("/api/v1/tenants/{id}/ledger", tenant.getId())
+                .header("Authorization", "Bearer " + token))
+            .andExpect(status().is4xxClientError());
     }
 
     private User user(String email, UserRole role) {
