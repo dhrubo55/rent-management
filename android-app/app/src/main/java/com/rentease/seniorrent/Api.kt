@@ -1,8 +1,12 @@
 package com.rentease.seniorrent
 
 import com.google.gson.JsonParser
+import com.google.gson.Gson
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Response
 import retrofit2.Retrofit
@@ -142,9 +146,54 @@ interface RentEaseApi {
 }
 
 object ApiFactory {
-    fun create(baseUrl: String): RentEaseApi {
+    fun create(baseUrl: String, sessionStore: SessionStore): RentEaseApi {
         val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
-        val client = OkHttpClient.Builder().addInterceptor(logging).build()
+        val refreshClient = OkHttpClient.Builder().build()
+        val client = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val token = sessionStore.accessToken()
+                val isAuth = request.url.encodedPath.contains("/auth/")
+                val authenticated = if (token != null && !isAuth) {
+                    request.newBuilder().header("Authorization", "Bearer $token").build()
+                } else request
+                chain.proceed(authenticated)
+            }
+            .authenticator { _, response ->
+                if (response.request.url.encodedPath.contains("/auth/") || response.priorResponse != null) {
+                    null
+                } else synchronized(sessionStore) {
+                    val failedToken = response.request.header("Authorization")?.removePrefix("Bearer ")
+                    val currentToken = sessionStore.accessToken()
+                    if (currentToken != null && currentToken != failedToken) {
+                        response.request.newBuilder().header("Authorization", "Bearer $currentToken").build()
+                    } else {
+                        val refreshToken = sessionStore.refreshToken()
+                        if (refreshToken == null) null else {
+                            val body = Gson().toJson(mapOf("refreshToken" to refreshToken))
+                                .toRequestBody("application/json".toMediaType())
+                            val request = Request.Builder().url(baseUrl.trimEnd('/') + "/auth/refresh")
+                                .post(body).build()
+                            val refreshed = runCatching {
+                                refreshClient.newCall(request).execute().use { result ->
+                                    if (!result.isSuccessful) return@use null
+                                    val data = JsonParser.parseString(result.body?.string()).asJsonObject
+                                        .getAsJsonObject("data")
+                                    val access = data.get("accessToken").asString
+                                    val nextRefresh = data.get("refreshToken").asString
+                                    val role = data.get("role")?.asString ?: sessionStore.role()
+                                    sessionStore.save(access, nextRefresh, role)
+                                    access
+                                }
+                            }.getOrNull()
+                            if (refreshed == null) sessionStore.clear()
+                            refreshed?.let { response.request.newBuilder().header("Authorization", "Bearer $it").build() }
+                        }
+                    }
+                }
+            }
+            .addInterceptor(logging)
+            .build()
         val retrofit = Retrofit.Builder()
             .baseUrl(baseUrl)
             .client(client)

@@ -22,6 +22,8 @@ type AuthState = {
   error: string | null;
 };
 
+let refreshInFlight: Promise<string | null> | null = null;
+
 export const useAuthStore = defineStore("auth", {
   state: (): AuthState => ({
     accessToken: getStoredToken(ACCESS_TOKEN_KEY),
@@ -53,23 +55,34 @@ export const useAuthStore = defineStore("auth", {
       this.setRole(null);
       this.error = null;
     },
+    async refreshSession(): Promise<string | null> {
+      if (!this.refreshToken) return null;
+      if (refreshInFlight) return refreshInFlight;
+      refreshInFlight = (async () => {
+        try {
+          const response = await apiClient.post<{ success: boolean; data: AuthResponse }>("/auth/refresh", {
+            refreshToken: this.refreshToken
+          });
+          const data = response.data.data;
+          this.setAccessToken(data.accessToken);
+          this.setRefreshToken(data.refreshToken);
+          this.setRole(data.role ?? null);
+          if (data.preferredLanguage) setLanguage(data.preferredLanguage);
+          return data.accessToken;
+        } catch {
+          this.clearSession();
+          return null;
+        } finally {
+          refreshInFlight = null;
+        }
+      })();
+      return refreshInFlight;
+    },
     async bootstrapSession() {
       if (this.accessToken || !this.refreshToken) {
         return;
       }
-      try {
-        const response = await apiClient.post<{ success: boolean; data: AuthResponse }>("/auth/refresh", {
-          refreshToken: this.refreshToken
-        });
-        this.setAccessToken(response.data.data.accessToken);
-        this.setRefreshToken(response.data.data.refreshToken);
-        this.setRole(response.data.data.role ?? null);
-        if (response.data.data.preferredLanguage) {
-          setLanguage(response.data.data.preferredLanguage);
-        }
-      } catch {
-        this.clearSession();
-      }
+      await this.refreshSession();
     },
     async login(email: string, password: string) {
       this.loading = true;
