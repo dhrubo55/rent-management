@@ -7,9 +7,15 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
 
 public interface RefreshTokenRepository extends JpaRepository<RefreshToken, String> {
     Optional<RefreshToken> findByTokenHash(String tokenHash);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select rt from RefreshToken rt where rt.tokenHash = :tokenHash")
+    Optional<RefreshToken> findByTokenHashForUpdate(@Param("tokenHash") String tokenHash);
+    boolean existsByIdAndUserId(String id, Long userId);
     List<RefreshToken> findByUserIdOrderByCreatedAtDesc(Long userId);
 
     @Modifying

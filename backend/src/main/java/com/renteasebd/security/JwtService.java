@@ -31,7 +31,7 @@ public class JwtService {
         this.jwtProperties = jwtProperties;
     }
 
-    public String generateAccessToken(User user) {
+    public String generateAccessToken(User user, String sessionId) {
         Instant now = Instant.now();
         Instant exp = now.plus(jwtProperties.getAccessTokenTtl());
 
@@ -39,6 +39,7 @@ public class JwtService {
             .subject(String.valueOf(user.getId()))
             .claim("email", user.getEmail())
             .claim("role", user.getRole().name())
+            .claim("sid", sessionId)
             .issuedAt(Date.from(now))
             .expiration(Date.from(exp))
             .signWith(resolvePrivateKey())

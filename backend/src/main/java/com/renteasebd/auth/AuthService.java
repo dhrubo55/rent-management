@@ -93,7 +93,7 @@ public class AuthService {
                 Map.of("deviceHint", refreshToken.getDeviceHint()));
 
             return new AuthResponse(
-                jwtService.generateAccessToken(user),
+                jwtService.generateAccessToken(user, refreshToken.getId()),
                 refreshTokenPlain,
                 jwtProperties.getAccessTokenTtl().toSeconds(),
                 normalizePreferredLanguage(user.getPreferredLanguage()),
@@ -109,7 +109,7 @@ public class AuthService {
 
     @Transactional
     public AuthResponse refresh(RefreshRequest request) {
-        RefreshToken token = refreshTokenRepository.findByTokenHash(hashToken(request.refreshToken()))
+        RefreshToken token = refreshTokenRepository.findByTokenHashForUpdate(hashToken(request.refreshToken()))
             .orElseThrow(() -> new AppException("TOKEN_INVALID", "Refresh token is invalid", "refreshToken"));
 
         if (token.getExpiresAt().isBefore(LocalDateTime.now())) {
@@ -122,12 +122,20 @@ public class AuthService {
             throw new AppException("ACCOUNT_DISABLED", "Your account is disabled", null);
         }
 
+        String nextPlain = UUID.randomUUID().toString();
+        RefreshToken next = new RefreshToken();
+        next.setUser(user);
+        next.setTokenHash(hashToken(nextPlain));
+        next.setDeviceHint(token.getDeviceHint());
+        next.setExpiresAt(LocalDateTime.now().plus(jwtProperties.getRefreshTokenTtl()));
+        refreshTokenRepository.delete(token);
+        refreshTokenRepository.save(next);
         auditService.log(user.getId(), "AUTH_REFRESH", "USER", String.valueOf(user.getId()), null,
-            Map.of("refreshTokenId", token.getId()));
+            Map.of("refreshTokenId", next.getId()));
 
         return new AuthResponse(
-            jwtService.generateAccessToken(user),
-            request.refreshToken(),
+            jwtService.generateAccessToken(user, next.getId()),
+            nextPlain,
             jwtProperties.getAccessTokenTtl().toSeconds(),
             normalizePreferredLanguage(user.getPreferredLanguage()),
             user.getRole().name());
