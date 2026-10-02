@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import axios from "axios";
 import { apiClient } from "../api";
 import { setLanguage, t } from "../i18n";
 
@@ -69,8 +70,9 @@ export const useAuthStore = defineStore("auth", {
           this.setRole(data.role ?? null);
           if (data.preferredLanguage) setLanguage(data.preferredLanguage);
           return data.accessToken;
-        } catch {
-          this.clearSession();
+        } catch (error) {
+          const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+          if (status === 400 || status === 401 || status === 403) this.clearSession();
           return null;
         } finally {
           refreshInFlight = null;

@@ -4,10 +4,35 @@ import { AxiosError, AxiosHeaders, type AxiosAdapter, type InternalAxiosRequestC
 import { apiClient, setAccessTokenProvider, setUnauthorizedHandler } from "../api";
 import { useAuthStore } from "./auth";
 
+const originalAdapter = apiClient.defaults.adapter;
+
 afterEach(() => {
   apiClient.interceptors.request.clear();
   apiClient.interceptors.response.clear();
+  apiClient.defaults.adapter = originalAdapter;
   vi.unstubAllGlobals();
+});
+
+test("a temporary refresh network error keeps the session available for retry", async () => {
+  const values = new Map<string, string>();
+  vi.stubGlobal("window", {
+    localStorage: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key)
+    }
+  });
+  setActivePinia(createPinia());
+  const auth = useAuthStore();
+  auth.setAccessToken("expired-access");
+  auth.setRefreshToken("still-valid-refresh");
+  apiClient.defaults.adapter = async (config) => {
+    throw new AxiosError("offline", "ERR_NETWORK", config);
+  };
+
+  expect(await auth.refreshSession()).toBeNull();
+  expect(auth.accessToken).toBe("expired-access");
+  expect(auth.refreshToken).toBe("still-valid-refresh");
 });
 
 test("concurrent expired requests refresh once and retain their request bodies", async () => {
