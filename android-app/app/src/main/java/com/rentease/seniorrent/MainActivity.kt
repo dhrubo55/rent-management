@@ -112,8 +112,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val api = ApiFactory.create(BuildConfig.API_BASE_URL)
         val sessionStore = SessionStore(this)
+        val api = ApiFactory.create(BuildConfig.API_BASE_URL, sessionStore)
 
         setContent {
             MaterialTheme(
@@ -291,6 +291,7 @@ private fun RentEaseSeniorApp(api: RentEaseApi, sessionStore: SessionStore) {
         runCatching { refreshCoreData(token) }
             .onFailure {
                 ui = ui.copy(isLoading = false)
+                if (sessionStore.accessToken() == null) ui = ui.copy(token = null, role = null)
                 snackbarHostState.showSnackbar(it.message ?: "Failed to load data")
             }
     }

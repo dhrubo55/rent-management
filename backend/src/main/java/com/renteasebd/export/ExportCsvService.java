@@ -12,10 +12,10 @@ import com.renteasebd.domain.user.UserRole;
 import com.renteasebd.repository.ExpenseRepository;
 import com.renteasebd.repository.InvoicePaymentRepository;
 import com.renteasebd.repository.InvoiceRepository;
-import com.renteasebd.repository.PropertyRepository;
 import com.renteasebd.repository.PropertyUnitRepository;
 import com.renteasebd.repository.SecurityDepositTransactionRepository;
 import com.renteasebd.repository.TenantRepository;
+import com.renteasebd.security.ResourceAccessService;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,30 +27,30 @@ public class ExportCsvService {
 
     private static final List<String> SUPPORTED_DATASETS = List.of("tenants", "invoices", "payments", "expenses", "deposits");
 
-    private final PropertyRepository propertyRepository;
     private final PropertyUnitRepository propertyUnitRepository;
     private final TenantRepository tenantRepository;
     private final InvoiceRepository invoiceRepository;
     private final InvoicePaymentRepository invoicePaymentRepository;
     private final ExpenseRepository expenseRepository;
     private final SecurityDepositTransactionRepository securityDepositTransactionRepository;
+    private final ResourceAccessService access;
 
     public ExportCsvService(
-        PropertyRepository propertyRepository,
         PropertyUnitRepository propertyUnitRepository,
         TenantRepository tenantRepository,
         InvoiceRepository invoiceRepository,
         InvoicePaymentRepository invoicePaymentRepository,
         ExpenseRepository expenseRepository,
-        SecurityDepositTransactionRepository securityDepositTransactionRepository
+        SecurityDepositTransactionRepository securityDepositTransactionRepository,
+        ResourceAccessService access
     ) {
-        this.propertyRepository = propertyRepository;
         this.propertyUnitRepository = propertyUnitRepository;
         this.tenantRepository = tenantRepository;
         this.invoiceRepository = invoiceRepository;
         this.invoicePaymentRepository = invoicePaymentRepository;
         this.expenseRepository = expenseRepository;
         this.securityDepositTransactionRepository = securityDepositTransactionRepository;
+        this.access = access;
     }
 
     public List<String> supportedDatasets() {
@@ -168,9 +168,7 @@ public class ExportCsvService {
     }
 
     private AccessScope resolveScope(Long actorUserId, UserRole role) {
-        List<Property> properties = role == UserRole.OWNER
-            ? propertyRepository.findByOwnerIdAndStatus(actorUserId, "ACTIVE")
-            : propertyRepository.findByStatus("ACTIVE");
+        List<Property> properties = access.accessibleProperties(actorUserId, role);
         if (properties.isEmpty()) {
             return new AccessScope(List.of(), List.of(), List.of(), List.of(), List.of());
         }

@@ -43,15 +43,16 @@ public class TenantController {
     @PreAuthorize("hasAnyRole('OWNER','MANAGER')")
     public ApiResponse<List<TenantResponse>> list(
         @RequestParam(required = false) TenantStatus status,
-        @RequestParam(required = false) Long propertyId
+        @RequestParam(required = false) Long propertyId,
+        @AuthenticationPrincipal UserPrincipal principal
     ) {
-        return ApiResponse.ok(tenantService.list(status, propertyId));
+        return ApiResponse.ok(tenantService.list(status, propertyId, principal.id(), principal.role()));
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('OWNER','MANAGER')")
-    public ApiResponse<TenantDetailResponse> get(@PathVariable Long id) {
-        return ApiResponse.ok(tenantService.getDetail(id));
+    public ApiResponse<TenantDetailResponse> get(@PathVariable Long id, @AuthenticationPrincipal UserPrincipal principal) {
+        return ApiResponse.ok(tenantService.getDetail(id, principal.id(), principal.role()));
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -60,7 +61,7 @@ public class TenantController {
         @Valid @ModelAttribute CreateTenantRequest request,
         @AuthenticationPrincipal UserPrincipal principal
     ) {
-        return ApiResponse.ok(tenantService.create(request, principal.id()));
+        return ApiResponse.ok(tenantService.create(request, principal.id(), principal.role()));
     }
 
     @PutMapping("/{id}")
@@ -70,39 +71,39 @@ public class TenantController {
         @Valid @RequestBody UpdateTenantRequest request,
         @AuthenticationPrincipal UserPrincipal principal
     ) {
-        return ApiResponse.ok(tenantService.update(id, request, principal.id()));
+        return ApiResponse.ok(tenantService.update(id, request, principal.id(), principal.role()));
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('OWNER','MANAGER')")
     public ApiResponse<Void> deactivate(@PathVariable Long id, @AuthenticationPrincipal UserPrincipal principal) {
-        tenantService.deactivate(id, principal.id());
+        tenantService.deactivate(id, principal.id(), principal.role());
         return ApiResponse.ok(null);
     }
 
     @GetMapping("/{id}/history")
     @PreAuthorize("hasAnyRole('OWNER','MANAGER')")
-    public ApiResponse<List<TenantHistoryResponse>> history(@PathVariable Long id) {
-        return ApiResponse.ok(tenantService.history(id));
+    public ApiResponse<List<TenantHistoryResponse>> history(@PathVariable Long id, @AuthenticationPrincipal UserPrincipal principal) {
+        return ApiResponse.ok(tenantService.history(id, principal.id(), principal.role()));
     }
 
     @GetMapping("/{id}/activity")
     @PreAuthorize("hasAnyRole('OWNER','MANAGER')")
-    public ApiResponse<List<AuditTimelineItemResponse>> activity(@PathVariable Long id) {
-        return ApiResponse.ok(tenantService.activity(id));
+    public ApiResponse<List<AuditTimelineItemResponse>> activity(@PathVariable Long id, @AuthenticationPrincipal UserPrincipal principal) {
+        return ApiResponse.ok(tenantService.activity(id, principal.id(), principal.role()));
     }
 
     @GetMapping("/{id}/ledger")
     @PreAuthorize("hasAnyRole('OWNER','MANAGER')")
-    public ApiResponse<TenantLedgerResponse> ledger(@PathVariable Long id) {
-        return ApiResponse.ok(tenantService.ledger(id));
+    public ApiResponse<TenantLedgerResponse> ledger(@PathVariable Long id, @AuthenticationPrincipal UserPrincipal principal) {
+        return ApiResponse.ok(tenantService.ledger(id, principal.id(), principal.role()));
     }
 
     @GetMapping("/{id}/nid-image")
     @PreAuthorize("hasAnyRole('OWNER','MANAGER')")
-    public ResponseEntity<byte[]> getNidImage(@PathVariable Long id) {
-        byte[] body = tenantService.getNidImage(id);
-        String mimeType = tenantService.getNidImageMimeType(id);
+    public ResponseEntity<byte[]> getNidImage(@PathVariable Long id, @AuthenticationPrincipal UserPrincipal principal) {
+        byte[] body = tenantService.getNidImage(id, principal.id(), principal.role());
+        String mimeType = tenantService.getNidImageMimeType(id, principal.id(), principal.role());
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_TYPE, mimeType)
             .body(body);
@@ -115,7 +116,7 @@ public class TenantController {
         @RequestParam("nidImage") MultipartFile nidImage,
         @AuthenticationPrincipal UserPrincipal principal
     ) {
-        tenantService.updateNidImage(id, nidImage, principal.id());
+        tenantService.updateNidImage(id, nidImage, principal.id(), principal.role());
         return ApiResponse.ok(null);
     }
 }

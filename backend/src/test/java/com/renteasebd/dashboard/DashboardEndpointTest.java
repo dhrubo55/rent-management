@@ -20,6 +20,7 @@ import com.renteasebd.domain.user.UserRole;
 import com.renteasebd.invoice.InvoiceService;
 import com.renteasebd.invoice.dto.CreateInvoiceRequest;
 import com.renteasebd.repository.PropertyRepository;
+import com.renteasebd.repository.NotificationEventRepository;
 import com.renteasebd.repository.PropertyUnitRepository;
 import com.renteasebd.repository.TenantRepository;
 import com.renteasebd.repository.UserRepository;
@@ -60,6 +61,9 @@ class DashboardEndpointTest {
 
     @Autowired
     private TenantRepository tenantRepository;
+
+    @Autowired
+    private NotificationEventRepository notificationEvents;
 
     @Autowired
     private InvoiceService invoiceService;
@@ -137,6 +141,8 @@ class DashboardEndpointTest {
             UserRole.OWNER
         );
         invoiceService.send(generated.invoice().id(), owner.getId(), UserRole.OWNER);
+        org.assertj.core.api.Assertions.assertThat(notificationEvents.findByOwnerUserIdOrderByCreatedAtDesc(owner.getId()))
+            .allSatisfy(event -> org.assertj.core.api.Assertions.assertThat(event.getDestination()).isNull());
 
         String token = loginAndGetAccessToken(owner.getEmail(), "Owner@123");
         assertDashboardEndpoints(token);

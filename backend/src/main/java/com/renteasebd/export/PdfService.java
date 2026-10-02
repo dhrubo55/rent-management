@@ -11,10 +11,10 @@ import com.renteasebd.domain.tenant.Tenant;
 import com.renteasebd.domain.user.UserRole;
 import com.renteasebd.invoice.InvoiceService;
 import com.renteasebd.invoice.dto.InvoiceResponse;
-import com.renteasebd.repository.PropertyRepository;
 import com.renteasebd.repository.PropertyUnitRepository;
 import com.renteasebd.repository.SecurityDepositTransactionRepository;
 import com.renteasebd.repository.TenantRepository;
+import com.renteasebd.security.ResourceAccessService;
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -58,23 +58,23 @@ public class PdfService {
     private final SecurityDepositTransactionRepository securityDepositTransactionRepository;
     private final TenantRepository tenantRepository;
     private final PropertyUnitRepository propertyUnitRepository;
-    private final PropertyRepository propertyRepository;
     private final ObjectMapper objectMapper;
+    private final ResourceAccessService access;
 
     public PdfService(
         InvoiceService invoiceService,
         SecurityDepositTransactionRepository securityDepositTransactionRepository,
         TenantRepository tenantRepository,
         PropertyUnitRepository propertyUnitRepository,
-        PropertyRepository propertyRepository,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        ResourceAccessService access
     ) {
         this.invoiceService = invoiceService;
         this.securityDepositTransactionRepository = securityDepositTransactionRepository;
         this.tenantRepository = tenantRepository;
         this.propertyUnitRepository = propertyUnitRepository;
-        this.propertyRepository = propertyRepository;
         this.objectMapper = objectMapper;
+        this.access = access;
     }
 
     @Transactional(readOnly = true)
@@ -104,11 +104,7 @@ public class PdfService {
             .orElseThrow(() -> new AppException("TENANT_NOT_FOUND", "Tenant not found", "tenantId"));
         PropertyUnit unit = propertyUnitRepository.findById(tenant.getPropertyUnitId())
             .orElseThrow(() -> new AppException("UNIT_NOT_FOUND", "Unit not found", "propertyUnitId"));
-        Property property = propertyRepository.findById(unit.getPropertyId())
-            .orElseThrow(() -> new AppException("PROPERTY_NOT_FOUND", "Property not found", "propertyId"));
-        if (role == UserRole.OWNER && !property.getOwnerId().equals(actorUserId)) {
-            throw new AppException("FORBIDDEN", "You do not have access to this receipt", "transactionId");
-        }
+        Property property = access.requireProperty(unit.getPropertyId(), actorUserId, role);
 
         String lang = normalizeLang(requestedLang);
         return renderPdf(

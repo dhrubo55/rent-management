@@ -24,6 +24,7 @@ import com.renteasebd.repository.PropertySettingsRepository;
 import com.renteasebd.repository.PropertyUnitRepository;
 import com.renteasebd.repository.AuditLogRepository;
 import com.renteasebd.repository.UtilityChargeConfigRepository;
+import com.renteasebd.security.ResourceAccessService;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,7 @@ public class PropertyService {
     private final UtilityChargeConfigRepository utilityChargeConfigRepository;
     private final AuditLogRepository auditLogRepository;
     private final AuditService auditService;
+    private final ResourceAccessService access;
 
     public PropertyService(
         PropertyRepository propertyRepository,
@@ -46,7 +48,8 @@ public class PropertyService {
         PropertySettingsRepository propertySettingsRepository,
         UtilityChargeConfigRepository utilityChargeConfigRepository,
         AuditLogRepository auditLogRepository,
-        AuditService auditService
+        AuditService auditService,
+        ResourceAccessService access
     ) {
         this.propertyRepository = propertyRepository;
         this.unitRepository = unitRepository;
@@ -54,13 +57,12 @@ public class PropertyService {
         this.utilityChargeConfigRepository = utilityChargeConfigRepository;
         this.auditLogRepository = auditLogRepository;
         this.auditService = auditService;
+        this.access = access;
     }
 
     @Transactional(readOnly = true)
     public List<PropertyResponse> list(Long ownerId, UserRole role) {
-        List<Property> properties = role == UserRole.MANAGER
-            ? propertyRepository.findByStatus("ACTIVE")
-            : propertyRepository.findByOwnerIdAndStatus(ownerId, "ACTIVE");
+        List<Property> properties = access.accessibleProperties(ownerId, role);
         return properties.stream().map(this::toResponse).toList();
     }
 
@@ -272,11 +274,7 @@ public class PropertyService {
     }
 
     private Property getAccessibleProperty(Long propertyId, Long actorUserId, UserRole role) {
-        Property property = getActiveProperty(propertyId);
-        if (role == UserRole.OWNER && !property.getOwnerId().equals(actorUserId)) {
-            throw new AppException("FORBIDDEN", "You do not have access to this property", "propertyId");
-        }
-        return property;
+        return access.requireProperty(propertyId, actorUserId, role);
     }
 
     private Property getActiveProperty(Long propertyId) {
