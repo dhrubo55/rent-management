@@ -12,6 +12,8 @@ import com.renteasebd.domain.tenant.SecurityDepositStatus;
 import com.renteasebd.domain.tenant.Tenant;
 import com.renteasebd.domain.tenant.TenantStatus;
 import com.renteasebd.domain.tenant.TenantUnitHistory;
+import com.renteasebd.domain.user.UserRole;
+import com.renteasebd.security.ResourceAccessService;
 import com.renteasebd.repository.InvoicePaymentRepository;
 import com.renteasebd.repository.InvoiceRepository;
 import com.renteasebd.repository.PropertyUnitRepository;
@@ -46,6 +48,7 @@ public class TenantService {
     private final SecurityDepositTransactionRepository securityDepositTransactionRepository;
     private final AuditLogRepository auditLogRepository;
     private final AuditService auditService;
+    private final ResourceAccessService access;
 
     public TenantService(
         TenantRepository tenantRepository,
@@ -55,7 +58,8 @@ public class TenantService {
         InvoicePaymentRepository invoicePaymentRepository,
         SecurityDepositTransactionRepository securityDepositTransactionRepository,
         AuditLogRepository auditLogRepository,
-        AuditService auditService
+        AuditService auditService,
+        ResourceAccessService access
     ) {
         this.tenantRepository = tenantRepository;
         this.unitRepository = unitRepository;
@@ -65,12 +69,14 @@ public class TenantService {
         this.securityDepositTransactionRepository = securityDepositTransactionRepository;
         this.auditLogRepository = auditLogRepository;
         this.auditService = auditService;
+        this.access = access;
     }
 
     @Transactional(readOnly = true)
-    public List<TenantResponse> list(TenantStatus status, Long propertyId) {
+    public List<TenantResponse> list(TenantStatus status, Long propertyId, Long actorUserId, UserRole role) {
         List<Tenant> tenants;
         if (propertyId != null) {
+            access.requireProperty(propertyId, actorUserId, role);
             List<Long> unitIds = unitRepository.findByPropertyId(propertyId).stream().map(PropertyUnit::getId).toList();
             if (unitIds.isEmpty()) {
                 return Collections.emptyList();
@@ -79,7 +85,13 @@ public class TenantService {
                 ? tenantRepository.findByPropertyUnitIdIn(unitIds)
                 : tenantRepository.findByPropertyUnitIdInAndStatus(unitIds, status);
         } else {
-            tenants = status == null ? tenantRepository.findAll() : tenantRepository.findByStatus(status);
+            List<Long> unitIds = access.accessibleProperties(actorUserId, role).stream()
+                .flatMap(property -> unitRepository.findByPropertyId(property.getId()).stream())
+                .map(PropertyUnit::getId).toList();
+            if (unitIds.isEmpty()) return List.of();
+            tenants = status == null
+                ? tenantRepository.findByPropertyUnitIdIn(unitIds)
+                : tenantRepository.findByPropertyUnitIdInAndStatus(unitIds, status);
         }
         return tenants.stream()
             .sorted(Comparator.comparing(Tenant::getId).reversed())
@@ -88,20 +100,21 @@ public class TenantService {
     }
 
     @Transactional(readOnly = true)
-    public TenantResponse get(Long tenantId) {
-        return toResponse(getTenant(tenantId));
+    public TenantResponse get(Long tenantId, Long actorUserId, UserRole role) {
+        return toResponse(getTenant(tenantId, actorUserId, role));
     }
 
     @Transactional(readOnly = true)
-    public TenantDetailResponse getDetail(Long tenantId) {
-        return toDetailResponse(getTenant(tenantId));
+    public TenantDetailResponse getDetail(Long tenantId, Long actorUserId, UserRole role) {
+        return toDetailResponse(getTenant(tenantId, actorUserId, role), role == UserRole.OWNER);
     }
 
     @Transactional
-    public TenantResponse create(CreateTenantRequest request, Long actorUserId) {
+    public TenantResponse create(CreateTenantRequest request, Long actorUserId, UserRole role) {
         validateTenantBusinessRules(request.getLeaseStartDate(), request.getLeaseEndDate(), request.getNidImage());
 
         PropertyUnit unit = getUnit(request.getPropertyUnitId());
+        access.requireUnit(unit.getId(), actorUserId, role);
         assertUnitCanAcceptActiveTenant(unit.getId(), unit.getOccupancyStatus());
 
         Tenant tenant = new Tenant();
@@ -148,18 +161,24 @@ public class TenantService {
     }
 
     @Transactional
-    public TenantResponse update(Long tenantId, UpdateTenantRequest request, Long actorUserId) {
+    public TenantResponse update(Long tenantId, UpdateTenantRequest request, Long actorUserId, UserRole role) {
         if (request.leaseEndDate() != null && !request.leaseEndDate().isAfter(request.leaseStartDate())) {
             throw new AppException("INVALID_LEASE_DATE_RANGE", "Lease end date must be later than lease start date", "leaseEndDate");
         }
 
-        Tenant tenant = getTenant(tenantId);
+        Tenant tenant = getTenant(tenantId, actorUserId, role);
         TenantResponse oldState = toResponse(tenant);
 
         Long oldUnitId = tenant.getPropertyUnitId();
         Long newUnitId = request.propertyUnitId();
         if (!oldUnitId.equals(newUnitId)) {
             PropertyUnit newUnit = getUnit(newUnitId);
+            access.requireUnit(newUnitId, actorUserId, role);
+            Long oldOwnerId = access.requireUnit(oldUnitId, actorUserId, role).getOwnerId();
+            Long newOwnerId = access.requireUnit(newUnitId, actorUserId, role).getOwnerId();
+            if (!oldOwnerId.equals(newOwnerId)) {
+                throw new AppException("FORBIDDEN", "Tenant cannot move between owners", "propertyUnitId");
+            }
             assertUnitCanAcceptActiveTenant(newUnit.getId(), newUnit.getOccupancyStatus());
 
             PropertyUnit oldUnit = getUnit(oldUnitId);
@@ -206,8 +225,8 @@ public class TenantService {
     }
 
     @Transactional
-    public void deactivate(Long tenantId, Long actorUserId) {
-        Tenant tenant = getTenant(tenantId);
+    public void deactivate(Long tenantId, Long actorUserId, UserRole role) {
+        Tenant tenant = getTenant(tenantId, actorUserId, role);
         TenantResponse oldState = toResponse(tenant);
         tenant.setStatus(TenantStatus.INACTIVE);
         tenantRepository.save(tenant);
@@ -225,24 +244,24 @@ public class TenantService {
     }
 
     @Transactional(readOnly = true)
-    public List<TenantHistoryResponse> history(Long tenantId) {
-        getTenant(tenantId);
+    public List<TenantHistoryResponse> history(Long tenantId, Long actorUserId, UserRole role) {
+        getTenant(tenantId, actorUserId, role);
         return historyRepository.findByTenantIdOrderByStartDateDesc(tenantId).stream()
             .map(h -> new TenantHistoryResponse(h.getId(), h.getTenantId(), h.getPropertyUnitId(), h.getStartDate(), h.getEndDate()))
             .toList();
     }
 
     @Transactional(readOnly = true)
-    public List<AuditTimelineItemResponse> activity(Long tenantId) {
-        getTenant(tenantId);
+    public List<AuditTimelineItemResponse> activity(Long tenantId, Long actorUserId, UserRole role) {
+        getTenant(tenantId, actorUserId, role);
         return auditLogRepository.findTop100ByEntityTypeAndEntityIdOrderByCreatedAtDesc("TENANT", String.valueOf(tenantId)).stream()
             .map(this::toTimelineResponse)
             .toList();
     }
 
     @Transactional(readOnly = true)
-    public TenantLedgerResponse ledger(Long tenantId) {
-        getTenant(tenantId);
+    public TenantLedgerResponse ledger(Long tenantId, Long actorUserId, UserRole role) {
+        getTenant(tenantId, actorUserId, role);
 
         List<Invoice> invoices = invoiceRepository.findByTenantIdOrderByBillingPeriodStartDescIdDesc(tenantId);
         List<Long> invoiceIds = invoices.stream().map(Invoice::getId).toList();
@@ -306,8 +325,9 @@ public class TenantService {
     }
 
     @Transactional(readOnly = true)
-    public byte[] getNidImage(Long tenantId) {
-        Tenant tenant = getTenant(tenantId);
+    public byte[] getNidImage(Long tenantId, Long actorUserId, UserRole role) {
+        Tenant tenant = getTenant(tenantId, actorUserId, role);
+        access.requireIdentityDocument(tenant, actorUserId, role);
         if (tenant.getNidImage() == null || tenant.getNidImage().length == 0) {
             throw new AppException("NID_IMAGE_NOT_FOUND", "Tenant does not have an uploaded NID image", "nidImage");
         }
@@ -315,8 +335,9 @@ public class TenantService {
     }
 
     @Transactional(readOnly = true)
-    public String getNidImageMimeType(Long tenantId) {
-        Tenant tenant = getTenant(tenantId);
+    public String getNidImageMimeType(Long tenantId, Long actorUserId, UserRole role) {
+        Tenant tenant = getTenant(tenantId, actorUserId, role);
+        access.requireIdentityDocument(tenant, actorUserId, role);
         if (tenant.getNidImage() == null || tenant.getNidImage().length == 0 || tenant.getNidImageMimeType() == null) {
             throw new AppException("NID_IMAGE_NOT_FOUND", "Tenant does not have an uploaded NID image", "nidImage");
         }
@@ -324,18 +345,21 @@ public class TenantService {
     }
 
     @Transactional
-    public void updateNidImage(Long tenantId, MultipartFile file, Long actorUserId) {
+    public void updateNidImage(Long tenantId, MultipartFile file, Long actorUserId, UserRole role) {
         validateNidFile(file);
-        Tenant tenant = getTenant(tenantId);
+        Tenant tenant = getTenant(tenantId, actorUserId, role);
+        access.requireIdentityDocument(tenant, actorUserId, role);
         tenant.setNidImage(readBytes(file));
         tenant.setNidImageMimeType(file.getContentType());
         tenantRepository.save(tenant);
         auditService.log(actorUserId, "TENANT_NID_IMAGE_UPDATED", "TENANT", String.valueOf(tenantId), null, null);
     }
 
-    private Tenant getTenant(Long tenantId) {
-        return tenantRepository.findById(tenantId)
+    private Tenant getTenant(Long tenantId, Long actorUserId, UserRole role) {
+        Tenant tenant = tenantRepository.findById(tenantId)
             .orElseThrow(() -> new AppException("TENANT_NOT_FOUND", "Tenant not found", "tenantId"));
+        access.requireTenant(tenant, actorUserId, role);
+        return tenant;
     }
 
     private PropertyUnit getUnit(Long unitId) {
@@ -404,13 +428,13 @@ public class TenantService {
         );
     }
 
-    private TenantDetailResponse toDetailResponse(Tenant tenant) {
+    private TenantDetailResponse toDetailResponse(Tenant tenant, boolean includeIdentity) {
         return new TenantDetailResponse(
             tenant.getId(),
             tenant.getFullName(),
             tenant.getPhonePrimary(),
             tenant.getPhoneSecondary(),
-            tenant.getNidNumber(),
+            includeIdentity ? tenant.getNidNumber() : null,
             tenant.getDateOfBirth(),
             tenant.getPermanentAddress(),
             tenant.getCurrentAddress(),

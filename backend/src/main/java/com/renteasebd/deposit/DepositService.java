@@ -16,11 +16,11 @@ import com.renteasebd.domain.tenant.Tenant;
 import com.renteasebd.domain.tenant.TenantStatus;
 import com.renteasebd.domain.user.UserRole;
 import com.renteasebd.notification.NotificationService;
-import com.renteasebd.repository.PropertyRepository;
 import com.renteasebd.repository.PropertyUnitRepository;
 import com.renteasebd.repository.SecurityDepositTransactionRepository;
 import com.renteasebd.repository.TenantRepository;
 import com.renteasebd.tenant.TenantService;
+import com.renteasebd.security.ResourceAccessService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
@@ -41,27 +41,27 @@ public class DepositService {
     private final SecurityDepositTransactionRepository securityDepositTransactionRepository;
     private final TenantRepository tenantRepository;
     private final PropertyUnitRepository propertyUnitRepository;
-    private final PropertyRepository propertyRepository;
     private final TenantService tenantService;
     private final AuditService auditService;
     private final NotificationService notificationService;
+    private final ResourceAccessService access;
 
     public DepositService(
         SecurityDepositTransactionRepository securityDepositTransactionRepository,
         TenantRepository tenantRepository,
         PropertyUnitRepository propertyUnitRepository,
-        PropertyRepository propertyRepository,
         TenantService tenantService,
         AuditService auditService,
-        NotificationService notificationService
+        NotificationService notificationService,
+        ResourceAccessService access
     ) {
         this.securityDepositTransactionRepository = securityDepositTransactionRepository;
         this.tenantRepository = tenantRepository;
         this.propertyUnitRepository = propertyUnitRepository;
-        this.propertyRepository = propertyRepository;
         this.tenantService = tenantService;
         this.auditService = auditService;
         this.notificationService = notificationService;
+        this.access = access;
     }
 
     @Transactional(readOnly = true)
@@ -239,7 +239,7 @@ public class DepositService {
         }
 
         if (context.tenant().getStatus() == TenantStatus.ACTIVE) {
-            tenantService.deactivate(context.tenant().getId(), actorUserId);
+            tenantService.deactivate(context.tenant().getId(), actorUserId, role);
         }
 
         Tenant refreshedTenant = tenantRepository.findById(context.tenant().getId())
@@ -283,18 +283,11 @@ public class DepositService {
     }
 
     private List<Property> resolveAccessibleProperties(Long actorUserId, UserRole role) {
-        return role == UserRole.OWNER
-            ? propertyRepository.findByOwnerIdAndStatus(actorUserId, "ACTIVE")
-            : propertyRepository.findByStatus("ACTIVE");
+        return access.accessibleProperties(actorUserId, role);
     }
 
     private Property getAccessibleProperty(Long propertyId, Long actorUserId, UserRole role) {
-        Property property = propertyRepository.findByIdAndStatus(propertyId, "ACTIVE")
-            .orElseThrow(() -> new AppException("PROPERTY_NOT_FOUND", "Property not found", "propertyId"));
-        if (role == UserRole.OWNER && !property.getOwnerId().equals(actorUserId)) {
-            throw new AppException("FORBIDDEN", "You do not have access to this property", "propertyId");
-        }
-        return property;
+        return access.requireProperty(propertyId, actorUserId, role);
     }
 
     private BalanceSummary summarize(Tenant tenant, List<SecurityDepositTransaction> txns) {

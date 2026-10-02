@@ -34,6 +34,7 @@ import com.renteasebd.repository.PropertyRepository;
 import com.renteasebd.repository.PropertySettingsRepository;
 import com.renteasebd.repository.PropertyUnitRepository;
 import com.renteasebd.repository.TenantRepository;
+import com.renteasebd.security.ResourceAccessService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -74,6 +75,7 @@ public class InvoiceService {
     private final ObjectMapper objectMapper;
     private final NotificationService notificationService;
     private final InvoiceDownloadTokenService invoiceDownloadTokenService;
+    private final ResourceAccessService access;
 
     public InvoiceService(
         InvoiceRepository invoiceRepository,
@@ -85,7 +87,8 @@ public class InvoiceService {
         AuditService auditService,
         ObjectMapper objectMapper,
         NotificationService notificationService,
-        InvoiceDownloadTokenService invoiceDownloadTokenService
+        InvoiceDownloadTokenService invoiceDownloadTokenService,
+        ResourceAccessService access
     ) {
         this.invoiceRepository = invoiceRepository;
         this.invoicePaymentRepository = invoicePaymentRepository;
@@ -97,6 +100,7 @@ public class InvoiceService {
         this.objectMapper = objectMapper;
         this.notificationService = notificationService;
         this.invoiceDownloadTokenService = invoiceDownloadTokenService;
+        this.access = access;
     }
 
     @Transactional(readOnly = true)
@@ -751,22 +755,14 @@ public class InvoiceService {
     }
 
     private Property getAccessibleProperty(Long propertyId, Long actorUserId, UserRole role) {
-        Property property = propertyRepository.findByIdAndStatus(propertyId, "ACTIVE")
-            .orElseThrow(() -> new AppException("PROPERTY_NOT_FOUND", "Property not found", "propertyId"));
-        if (role == UserRole.OWNER && !property.getOwnerId().equals(actorUserId)) {
-            throw new AppException("FORBIDDEN", "You do not have access to this property", "propertyId");
-        }
-        return property;
+        return access.requireProperty(propertyId, actorUserId, role);
     }
 
     private List<Property> resolveAccessibleProperties(Long actorUserId, UserRole role, Long propertyId) {
         if (propertyId != null) {
             return List.of(getAccessibleProperty(propertyId, actorUserId, role));
         }
-        if (role == UserRole.OWNER) {
-            return propertyRepository.findByOwnerIdAndStatus(actorUserId, "ACTIVE");
-        }
-        return propertyRepository.findByStatus("ACTIVE");
+        return access.accessibleProperties(actorUserId, role);
     }
 
     private PropertyUnit getUnitOrThrow(Long unitId) {

@@ -13,8 +13,8 @@ import com.renteasebd.domain.user.UserRole;
 import com.renteasebd.notification.dto.NotificationEventResponse;
 import com.renteasebd.repository.InvoiceRepository;
 import com.renteasebd.repository.NotificationEventRepository;
-import com.renteasebd.repository.PropertyRepository;
 import com.renteasebd.repository.PropertyUnitRepository;
+import com.renteasebd.security.ResourceAccessService;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -32,23 +32,23 @@ public class NotificationService {
     );
 
     private final NotificationEventRepository notificationEventRepository;
-    private final PropertyRepository propertyRepository;
     private final PropertyUnitRepository propertyUnitRepository;
     private final InvoiceRepository invoiceRepository;
     private final AuditService auditService;
+    private final ResourceAccessService access;
 
     public NotificationService(
         NotificationEventRepository notificationEventRepository,
-        PropertyRepository propertyRepository,
         PropertyUnitRepository propertyUnitRepository,
         InvoiceRepository invoiceRepository,
-        AuditService auditService
+        AuditService auditService,
+        ResourceAccessService access
     ) {
         this.notificationEventRepository = notificationEventRepository;
-        this.propertyRepository = propertyRepository;
         this.propertyUnitRepository = propertyUnitRepository;
         this.invoiceRepository = invoiceRepository;
         this.auditService = auditService;
+        this.access = access;
     }
 
     @Transactional(readOnly = true)
@@ -61,17 +61,12 @@ public class NotificationService {
                 .map(this::toResponse)
                 .toList();
         }
-        return notificationEventRepository.findAll().stream()
-            .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
-            .map(this::toResponse)
-            .toList();
+        return List.of();
     }
 
     @Transactional
     public int createOverdueReminders(Long actorUserId, UserRole role) {
-        List<Property> accessibleProperties = role == UserRole.OWNER
-            ? propertyRepository.findByOwnerIdAndStatus(actorUserId, "ACTIVE")
-            : propertyRepository.findByStatus("ACTIVE");
+        List<Property> accessibleProperties = access.accessibleProperties(actorUserId, role);
         if (accessibleProperties.isEmpty()) {
             return 0;
         }
@@ -103,7 +98,6 @@ public class NotificationService {
                 property.getOwnerId(),
                 invoice.getTenantId(),
                 "OVERDUE_REMINDER",
-                null,
                 "Invoice #" + invoice.getId() + " is overdue with outstanding " + invoice.getBalanceDueBdt(),
                 "INVOICE",
                 String.valueOf(invoice.getId())
@@ -123,7 +117,6 @@ public class NotificationService {
             property.getOwnerId(),
             tenant.getId(),
             "INVOICE_SENT",
-            tenant.getPhonePrimary(),
             "Invoice #" + invoice.getId() + " sent. Due " + invoice.getDueDate() + ", amount " + invoice.getTotalDueBdt(),
             "INVOICE",
             String.valueOf(invoice.getId())
@@ -144,7 +137,6 @@ public class NotificationService {
             property.getOwnerId(),
             tenant.getId(),
             "PAYMENT_RECEIPT",
-            tenant.getPhonePrimary(),
             "Payment received for Invoice #" + invoice.getId() + ": " + amountBdt + " via " + paymentMethod + " on " + paymentDate,
             "INVOICE",
             String.valueOf(invoice.getId())
@@ -158,7 +150,6 @@ public class NotificationService {
             property.getOwnerId(),
             tenant.getId(),
             "MOVE_OUT_SETTLEMENT",
-            tenant.getPhonePrimary(),
             "Move-out settlement posted on " + moveOutDate + ". Deduction: " + deduction + ", Refund: " + refund,
             "TENANT",
             String.valueOf(tenant.getId())
@@ -170,7 +161,6 @@ public class NotificationService {
         Long ownerUserId,
         Long tenantId,
         String eventType,
-        String destination,
         String message,
         String relatedEntityType,
         String relatedEntityId
@@ -181,7 +171,7 @@ public class NotificationService {
         event.setEventType(eventType);
         event.setChannel(NotificationChannel.SMS);
         event.setStatus(NotificationStatus.MOCK_SENT);
-        event.setDestination(destination);
+        event.setDestination(null);
         event.setMessage(message);
         event.setRelatedEntityType(relatedEntityType);
         event.setRelatedEntityId(relatedEntityId);

@@ -9,7 +9,7 @@ import com.renteasebd.expense.dto.CreateExpenseRequest;
 import com.renteasebd.expense.dto.ExpenseResponse;
 import com.renteasebd.expense.dto.UpdateExpenseRequest;
 import com.renteasebd.repository.ExpenseRepository;
-import com.renteasebd.repository.PropertyRepository;
+import com.renteasebd.security.ResourceAccessService;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -26,13 +26,14 @@ public class ExpenseService {
     private static final long MAX_RECEIPT_BYTES = 5L * 1024 * 1024;
 
     private final ExpenseRepository expenseRepository;
-    private final PropertyRepository propertyRepository;
     private final AuditService auditService;
+    private final ResourceAccessService access;
 
-    public ExpenseService(ExpenseRepository expenseRepository, PropertyRepository propertyRepository, AuditService auditService) {
+    public ExpenseService(ExpenseRepository expenseRepository, AuditService auditService,
+                          ResourceAccessService access) {
         this.expenseRepository = expenseRepository;
-        this.propertyRepository = propertyRepository;
         this.auditService = auditService;
+        this.access = access;
     }
 
     @Transactional(readOnly = true)
@@ -160,9 +161,7 @@ public class ExpenseService {
     }
 
     private List<Property> resolveAccessibleProperties(Long actorUserId, UserRole role) {
-        return role == UserRole.OWNER
-            ? propertyRepository.findByOwnerIdAndStatus(actorUserId, "ACTIVE")
-            : propertyRepository.findByStatus("ACTIVE");
+        return access.accessibleProperties(actorUserId, role);
     }
 
     private Expense getAccessibleExpense(Long expenseId, Long actorUserId, UserRole role) {
@@ -173,12 +172,7 @@ public class ExpenseService {
     }
 
     private Property getAccessibleProperty(Long propertyId, Long actorUserId, UserRole role) {
-        Property property = propertyRepository.findByIdAndStatus(propertyId, "ACTIVE")
-            .orElseThrow(() -> new AppException("PROPERTY_NOT_FOUND", "Property not found", "propertyId"));
-        if (role == UserRole.OWNER && !property.getOwnerId().equals(actorUserId)) {
-            throw new AppException("FORBIDDEN", "You do not have access to this property", "propertyId");
-        }
-        return property;
+        return access.requireProperty(propertyId, actorUserId, role);
     }
 
     private String cleanCategory(String category) {

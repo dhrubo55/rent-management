@@ -14,9 +14,9 @@ import com.renteasebd.domain.tenant.Tenant;
 import com.renteasebd.domain.tenant.TenantStatus;
 import com.renteasebd.domain.user.UserRole;
 import com.renteasebd.repository.InvoiceRepository;
-import com.renteasebd.repository.PropertyRepository;
 import com.renteasebd.repository.PropertyUnitRepository;
 import com.renteasebd.repository.TenantRepository;
+import com.renteasebd.security.ResourceAccessService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -37,21 +37,21 @@ public class DashboardService {
 
     private static final Set<InvoiceStatus> EXCLUDED_INVOICE_STATUSES = Set.of(InvoiceStatus.CANCELLED, InvoiceStatus.VOID);
 
-    private final PropertyRepository propertyRepository;
     private final PropertyUnitRepository propertyUnitRepository;
     private final TenantRepository tenantRepository;
     private final InvoiceRepository invoiceRepository;
+    private final ResourceAccessService access;
 
     public DashboardService(
-        PropertyRepository propertyRepository,
         PropertyUnitRepository propertyUnitRepository,
         TenantRepository tenantRepository,
-        InvoiceRepository invoiceRepository
+        InvoiceRepository invoiceRepository,
+        ResourceAccessService access
     ) {
-        this.propertyRepository = propertyRepository;
         this.propertyUnitRepository = propertyUnitRepository;
         this.tenantRepository = tenantRepository;
         this.invoiceRepository = invoiceRepository;
+        this.access = access;
     }
 
     @Transactional(readOnly = true)
@@ -245,9 +245,7 @@ public class DashboardService {
     }
 
     private DataScope resolveScope(Long actorUserId, UserRole role, Long propertyId) {
-        List<Property> properties = role == UserRole.OWNER
-            ? propertyRepository.findByOwnerIdAndStatus(actorUserId, "ACTIVE")
-            : propertyRepository.findByStatus("ACTIVE");
+        List<Property> properties = access.accessibleProperties(actorUserId, role);
         if (propertyId != null) {
             properties = properties.stream().filter(property -> property.getId().equals(propertyId)).toList();
         }
